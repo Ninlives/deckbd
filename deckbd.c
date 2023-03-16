@@ -1,5 +1,6 @@
 #include <dirent.h>
 #include <fcntl.h>
+#include <glib.h>
 #include <linux/input.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -20,7 +21,7 @@ struct managed_device {
   struct libevdev_uinput* uinput;
 };
 
-static const uint8_t modifiers[] = {
+const uint8_t modifiers[] = {
   KEY_LEFTSHIFT,
   KEY_LEFTCTRL,
   KEY_LEFTALT,
@@ -69,8 +70,12 @@ int find_controller() {
 
   int fd = -1;
   DIR* devs = opendir("/dev/input");
-  struct dirent* dev;
+  if (devs == NULL) {
+    g_debug("Failed to open /dev/input\n");
+    return -1;
+  }
 
+  struct dirent* dev;
   while ((dev = readdir(devs)) != NULL) {
     if (dev->d_type == DT_CHR && starts_with("event", dev->d_name)) {
       // MAX_LEN(d_name) == 256, strlen("/dev/input/") == 11
@@ -79,20 +84,31 @@ int find_controller() {
       
       fd = open(path, O_RDONLY | O_NONBLOCK);
       if (fd < 0) {
-        printf("Failed to open %s\n", path);
+        g_debug("Failed to open %s\n", path);
       } else {
         struct input_id info = {};
         int rc;
 
         rc = ioctl(fd, EVIOCGID, &info);
         if (rc < 0){
-          printf("Failed to get device info of %s\n", path);
+          g_debug("Failed to get device info of %s\n", path);
           goto cleanup;
         }
 
         if (info.bustype == SD_TYPE && info.vendor == SD_VID && info.product == SD_PID) {
-          printf("Found controller: %s\n", path);
-          goto final;
+          struct libevdev* dev = NULL;
+          rc = libevdev_new_from_fd(fd, &dev);
+          if (rc < 0) {
+            g_debug("Failed to init libevdev for %s\n", path);
+            goto cleanup;
+          }
+          if (libevdev_has_event_code(dev, EV_KEY, BTN_DPAD_UP)) {
+            g_debug("Found controller: %s\n", path);
+            libevdev_free(dev);
+            goto final;
+          } else {
+            libevdev_free(dev);
+          }
         }
 
       cleanup:
@@ -112,7 +128,7 @@ struct managed_device init_evdev(int fd){
   struct libevdev* controller = NULL;
   int rc = libevdev_new_from_fd(fd, &controller);
   if (rc != 0){
-    printf("Failed to create libevdev.\n");
+    g_debug("Failed to create libevdev.\n");
     return device;
   }
   
@@ -128,7 +144,7 @@ struct managed_device init_evdev(int fd){
   if (rc != 0) {
     libevdev_free(controller);
     libevdev_free(input);
-    printf("Failed to create uinput device.\n");
+    g_debug("Failed to create uinput device.\n");
     return device;
   }
 
@@ -185,11 +201,11 @@ void handle_event(struct managed_device device, struct input_event ev) {
   }
 };
 
-static volatile bool listening = true;
-static void sig_handler(int signum) {
+volatile bool listening = true;
+void sig_handler(int signum) {
   listening = false;
 };
-static int init_signal_handler() {
+int init_signal_handler() {
   int rc;
   struct sigaction act = { 0 };
   act.sa_handler = &sig_handler;
@@ -205,38 +221,48 @@ static int init_signal_handler() {
   return 0;
 }
 
-int main(void) {
+int main(int argc, char* argv[]) {
+  if (argc > 1 && (strcmp("query", argv[1]) == 0)) {
+    int fd = find_controller();
+    if (fd < 0) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+
+  g_debug("Initializing.\n");
   int rc;
   rc = init_signal_handler();
   if (rc != 0) {
-    printf("Failed to initialize signal handler.\n");
-    return -1;
+    g_debug("Failed to initialize signal handler.\n");
+    return 1;
   }
 
   int fd = find_controller();
   if (fd < 0) {
-    printf("Failed to find controller.\n");
-    return -1;
+    g_debug("Failed to find controller.\n");
+    return 1;
   }
 
   struct managed_device device = init_evdev(fd);
   if (device.uinput == NULL) {
-    printf("Device initialisation failed.\n");
+    g_debug("Device initialisation failed.\n");
     close(fd);
-    return -1;
+    return 1;
   } 
 
-  printf("Listening...\n");
+  g_debug("Listening...\n");
   struct input_event ev;
   while(listening) {
     rc = libevdev_next_event(device.controller, LIBEVDEV_READ_FLAG_NORMAL, &ev);
     if (rc == 0 && ev.type == EV_KEY) {
-      printf("type: %x, code: %x, value: %x\n", ev.type, ev.code, ev.value);
+      g_debug("type: %x, code: %x, value: %x\n", ev.type, ev.code, ev.value);
       handle_event(device, ev);
     }
   }
   
   free_evdev(device);
-  printf("Deactivated.\n");
+  g_debug("Deactivated.\n");
   return 0;
 }
