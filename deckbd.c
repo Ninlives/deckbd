@@ -71,7 +71,7 @@ int find_controller() {
   int fd = -1;
   DIR* devs = opendir("/dev/input");
   if (devs == NULL) {
-    g_debug("Failed to open /dev/input\n");
+    g_debug("Failed to open /dev/input");
     return -1;
   }
 
@@ -84,14 +84,14 @@ int find_controller() {
       
       fd = open(path, O_RDONLY | O_NONBLOCK);
       if (fd < 0) {
-        g_debug("Failed to open %s\n", path);
+        g_debug("Failed to open %s", path);
       } else {
         struct input_id info = {};
         int rc;
 
         rc = ioctl(fd, EVIOCGID, &info);
         if (rc < 0){
-          g_debug("Failed to get device info of %s\n", path);
+          g_debug("Failed to get device info of %s", path);
           goto cleanup;
         }
 
@@ -99,11 +99,11 @@ int find_controller() {
           struct libevdev* dev = NULL;
           rc = libevdev_new_from_fd(fd, &dev);
           if (rc < 0) {
-            g_debug("Failed to init libevdev for %s\n", path);
+            g_debug("Failed to init libevdev for %s", path);
             goto cleanup;
           }
           if (libevdev_has_event_code(dev, EV_KEY, BTN_DPAD_UP)) {
-            g_debug("Found controller: %s\n", path);
+            g_debug("Found controller: %s", path);
             libevdev_free(dev);
             goto final;
           } else {
@@ -128,7 +128,7 @@ struct managed_device init_evdev(int fd){
   struct libevdev* controller = NULL;
   int rc = libevdev_new_from_fd(fd, &controller);
   if (rc != 0){
-    g_debug("Failed to create libevdev.\n");
+    g_debug("Failed to create libevdev.");
     return device;
   }
   
@@ -144,7 +144,7 @@ struct managed_device init_evdev(int fd){
   if (rc != 0) {
     libevdev_free(controller);
     libevdev_free(input);
-    g_debug("Failed to create uinput device.\n");
+    g_debug("Failed to create uinput device.");
     return device;
   }
 
@@ -231,38 +231,38 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  g_debug("Initializing.\n");
+  g_debug("Initializing.");
   int rc;
   rc = init_signal_handler();
   if (rc != 0) {
-    g_debug("Failed to initialize signal handler.\n");
+    g_debug("Failed to initialize signal handler.");
     return 1;
   }
 
   int fd = find_controller();
   if (fd < 0) {
-    g_debug("Failed to find controller.\n");
+    g_debug("Failed to find controller.");
     return 1;
   }
 
   struct managed_device device = init_evdev(fd);
   if (device.uinput == NULL) {
-    g_debug("Device initialisation failed.\n");
+    g_debug("Device initialisation failed.");
     close(fd);
     return 1;
   } 
 
-  g_debug("Listening...\n");
+  g_debug("Listening...");
   struct input_event ev;
   while(listening) {
     rc = libevdev_next_event(device.controller, LIBEVDEV_READ_FLAG_NORMAL, &ev);
     if (rc == 0 && ev.type == EV_KEY) {
-      g_debug("type: %x, code: %x, value: %x\n", ev.type, ev.code, ev.value);
+      g_debug("pressed type: %x, code: %x, value: %x", ev.type, ev.code, ev.value);
       handle_event(device, ev);
     }
   }
   
   free_evdev(device);
-  g_debug("Deactivated.\n");
+  g_debug("Deactivated.");
   return 0;
 }
